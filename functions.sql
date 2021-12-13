@@ -1,5 +1,4 @@
-/*Функция смены проживания, проверяет прошло ли достаточно времени с момента заселения
-после чего заполняет время выселения и создает новую запись в проживание. Также чекает банду*/
+
 
 CREATE OR REPLACE FUNCTION run_over(destination integer, person integer)
 RETURNS BOOLEAN AS $RES$
@@ -17,9 +16,9 @@ BEGIN
 	IF (DIFF > '00:05:00' and (NOT is_knock_down(person)))
 	THEN
 
-		SELECT "Банда_id" INTO PBAND FROM "Бандит" WHERE "Бандит"."id" = person;
-		SELECT "Блок_ЕдиницаТерритории_id" INTO CRRPLASE FROM "Проживание" WHERE "Бандит_id" = person and "времяВыселения" is null;
-		SELECT "Банда_id" INTO BBAND FROM "Блок" WHERE "ЕдиницаТерритории_id"= destination;
+		SELECT Gang_id INTO PBAND FROM Bandit WHERE Bandit.id = person;
+		SELECT Block_AreaUnit_id INTO CRRPLASE FROM Accommodation WHERE Bandit_id = person and checkOutTime is null;
+		SELECT Gang_id INTO BBAND FROM Block WHERE AreaUnit_id= destination;
 
 		IF (PBAND = BBAND OR BBAND is null)
 		THEN
@@ -27,8 +26,8 @@ BEGIN
 			IF (PL > 0)
 			THEN
 			RES:= true;
-			UPDATE "Проживание" SET "времяВыселения" = NOW() WHERE "Блок_ЕдиницаТерритории_id" = CRRPLASE and "Бандит_id" = person and "времяВыселения" is null ;
-			insert into "Проживание" values (NEXTVAL('Проживание_id_seq'), destination ,person, NOW());
+			UPDATE Accommodation SET checkOutTime = NOW() WHERE Block_AreaUnit_id = CRRPLASE and Bandit_id = person and checkOutTime is null ;
+			insert into Accommodation values (NEXTVAL('Accommodation_id_seq'), destination ,person, NOW());
 			ELSE
 			RES:= false;
 			END IF;
@@ -43,15 +42,18 @@ BEGIN
 END;
 $RES$ LANGUAGE plpgsql;
 
+
+
+
 CREATE OR REPLACE FUNCTION get_time_in(person integer)
 RETURNS TIMESTAMP AS $RES$
 DECLARE 
 	RES TIMESTAMP;
 BEGIN
-	SELECT "времяЗаселения" INTO RES FROM "Проживание" WHERE "Бандит_id"=person and "времяВыселения" IS NULL;
-	RETURN RES;
+	SELECT checkInTime INTO RES FROM Accommodation WHERE Bandit_id=person and checkOutTime IS NULL; RETURN RES;
 END;
 $RES$ LANGUAGE plpgsql;
+
 
 CREATE OR REPLACE FUNCTION get_capacity(plase integer)
 RETURNS INTEGER AS $RES$
@@ -59,14 +61,13 @@ DECLARE
 	RES INTEGER;
 	A INTEGER;
 BEGIN
-	SELECT COUNT(*) INTO RES FROM "Проживание" WHERE "Блок_ЕдиницаТерритории_id"=plase and "времяВыселения" IS NULL;
-	SELECT "вместительность" INTO A FROM "Блок" WHERE "ЕдиницаТерритории_id"=plase;
+	SELECT COUNT(*) INTO RES FROM Accommodation WHERE Block_AreaUnit_id=plase and checkOutTime IS NULL;
+	SELECT capacity INTO A FROM Block WHERE AreaUnit_id=plase;
 	RES:= A -RES;
 	RETURN RES;
 END;
 $RES$ LANGUAGE plpgsql;
 
-/*Функция захвата территории*/
 CREATE OR REPLACE FUNCTION capture_block(defense_id integer, initiator integer) RETURNS BOOLEAN AS $$
 DECLARE
 	DIFF TIME;
@@ -85,7 +86,7 @@ DECLARE
 BEGIN
 	SELECT what_is_blockid_bandit(initiator) INTO attack_id;
 
-	select max(время) INTO LAST_TIME from Попытка where Инициатор_id = initiator;
+	select max(time) INTO LAST_TIME from CaptureTry where Bandit_id = initiator;
 
 	IF (LAST_TIME is null)
 	THEN	
@@ -108,15 +109,15 @@ BEGIN
 	SELECT count_probability(attack_id,defense_id) INTO PROB;
 	SELECT random() INTO RAND;
 
-	INSERT INTO Попытка VALUES(DEFAULT, attack_id, defense_id, initiator, NULL, now()) RETURNING id INTO ID_TRY ;
+	INSERT INTO CaptureTry VALUES(DEFAULT, attack_id, defense_id, initiator, NULL, now()) RETURNING id INTO ID_TRY ;
 
 	IF(RAND<PROB)
 	THEN
-		SELECT NEXTVAL('Захват_id_seq') INTO ID_CAPTURE;
-		INSERT INTO Захват VALUES(ID_CAPTURE, now());
-		UPDATE Попытка SET Захват_id = ID_CAPTURE WHERE id = ID_TRY;
+		SELECT NEXTVAL('Capture_id_seq') INTO ID_CAPTURE;
+		INSERT INTO Capture VALUES(ID_CAPTURE, now());
+		UPDATE CaptureTry SET Capture_id = ID_CAPTURE WHERE id = ID_TRY;
 
-		UPDATE Блок SET Банда_id = (SELECT Банда_id FROM Блок WHERE ЕдиницаТерритории_id = attack_id) WHERE ЕдиницаТерритории_id = defense_id;
+		UPDATE Block SET Gang_id = (SELECT Gang_id FROM Block WHERE AreaUnit_id = attack_id) WHERE AreaUnit_id = defense_id;
 
 		PERFORM remove_heal_for_block(attack_id);
 		
@@ -134,7 +135,7 @@ CREATE OR REPLACE FUNCTION is_respawn(block_id integer) RETURNS BOOLEAN AS $RES$
 DECLARE
 	RES BOOLEAN;
 BEGIN
-	SELECT "респа" INTO RES FROM "Блок" WHERE "ЕдиницаТерритории_id" = block_id;
+	SELECT isRespawn INTO RES FROM Block WHERE AreaUnit_id = block_id;
 	RETURN RES;
 END;
 $RES$ LANGUAGE plpgsql;
@@ -154,7 +155,7 @@ DECLARE
 	SIZE INT;
 BEGIN
 
-	SELECT Банда_id INTO BAND FROM Блок WHERE ЕдиницаТерритории_id = defense_id;
+	SELECT Gang_id INTO BAND FROM Block WHERE AreaUnit_id = defense_id;
 	IF (BAND is null)
 	THEN
 		PROB := 1.0;
@@ -185,23 +186,51 @@ BEGIN
 END;
 $RES$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION count_characteristic(place integer, characteristic типХарактеристики) RETURNS INTEGER AS $RES$
+CREATE OR REPLACE FUNCTION inventary_add(bandid integer, itemid integer) RETURNS BOOLEAN AS $RES$
+DECLARE
+	RES BOOLEAN;
+	CHARACT_TT characteristicType;
+BEGIN
+	insert into Inventory values(bandid, itemid);
+	RETURN true;
+END;
+$RES$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION count_characteristic(place integer, charact text) RETURNS INTEGER AS $RES$
 DECLARE
 	RES INTEGER;
+	CHARACT_TT characteristicType;
 BEGIN
-	SELECT SUM(Предмет.характеристика) INTO RES FROM Инвентарь INNER JOIN Предмет ON Предмет.id = Инвентарь.Предмет_id 
-		INNER JOIN ТипПредмета ON ТипПредмета.id = Предмет.ТипПредмета_id 
-		WHERE ТипПредмета.типХарактеристики = characteristic AND Инвентарь.Бандит_id IN (SELECT * FROM get_block_bandits_id(place));
+	SELECT CAST(charact AS characteristicType) INTO CHARACT_TT;
+	SELECT SUM(Item.characteristic) INTO RES FROM Inventory INNER JOIN Item ON Item.id = Inventory.Item_id 
+		INNER JOIN ItemType ON ItemType.id = Item.ItemType_id 
+		WHERE ItemType.characteristicType = CHARACT_TT AND Inventory.Bandit_id IN (SELECT * FROM get_block_bandits_id(place));
 	RETURN RES;
 END;
 $RES$ LANGUAGE plpgsql;
 
+
+
+CREATE OR REPLACE FUNCTION count_characteristic_bandit(banditid integer, charact text) RETURNS INTEGER AS $RES$
+DECLARE
+	RES INTEGER;
+	CHARACT_TT characteristicType;
+BEGIN
+	SELECT CAST (charact AS characteristicType) INTO CHARACT_TT;
+	SELECT SUM(Item.characteristic) INTO RES FROM Inventory INNER JOIN Item ON Item.id = Inventory.Item_id 
+		INNER JOIN ItemType ON ItemType.id = Item.ItemType_id 
+		WHERE ItemType.characteristicType = CHARACT_TT AND Inventory.Bandit_id = banditid;
+	RETURN RES;
+END;
+$RES$ LANGUAGE plpgsql;
+
+
 CREATE OR REPLACE FUNCTION get_block_bandits_id(place integer) RETURNS SETOF INTEGER AS $$
-		SELECT id as id FROM Бандит WHERE id IN (SELECT Бандит_id FROM Проживание WHERE Блок_ЕдиницаТерритории_id = place AND "времяВыселения" is null); 
+		SELECT id as id FROM Bandit WHERE id IN (SELECT Bandit_id FROM Accommodation WHERE Block_AreaUnit_id = place AND checkOutTime is null); 
 $$ LANGUAGE sql;
 
 CREATE OR REPLACE FUNCTION get_block_bandits_number(place integer) RETURNS BIGINT AS $$
-		SELECT count(*) FROM Бандит WHERE id IN (SELECT Бандит_id FROM Проживание WHERE Блок_ЕдиницаТерритории_id = place AND "времяВыселения" is null); 
+		SELECT count(*) FROM Bandit WHERE id IN (SELECT Bandit_id FROM Accommodation WHERE Block_AreaUnit_id = place AND checkOutTime is null); 
 $$ LANGUAGE sql;
 
 CREATE OR REPLACE FUNCTION knock_down(anyarray) RETURNS BOOLEAN AS $$
@@ -217,12 +246,24 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+
+
+CREATE OR REPLACE FUNCTION get_respawn(gangId integer) RETURNS INTEGER AS $$
+DECLARE 
+	ID_R INTEGER;
+BEGIN
+	SELECT AreaUnit_id into ID_R FROM Block WHERE Block.Gang_id in (SELECT Gang_id FROM Block WHERE Gang_id = gangId) AND isRespawn = true;
+	RETURN ID_R;
+END;
+$$ LANGUAGE plpgsql;
+
+
 CREATE OR REPLACE FUNCTION knock_down(bandit_id integer) RETURNS INTEGER AS $$
 
 BEGIN
 	IF(NOT is_knock_down(bandit_id))
 	THEN	
-		UPDATE Бандит SET безСознания = '00:05:00' WHERE id = bandit_id;
+		UPDATE Bandit SET isKnockDown = '00:05:00' WHERE id = bandit_id;
 	END IF;
 	RETURN bandit_id;
 END;
@@ -232,7 +273,7 @@ CREATE OR REPLACE FUNCTION is_knock_down(bandit_id integer) RETURNS BOOLEAN AS $
 DECLARE
 	KNOCK TIME;
 BEGIN
-	SELECT безСознания INTO KNOCK FROM Бандит WHERE id = bandit_id;
+	SELECT isKnockDown INTO KNOCK FROM Bandit WHERE id = bandit_id;
 	IF(KNOCK = '00:00:00')
 	THEN
 		RETURN false;
@@ -242,11 +283,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION what_is_blockid_bandit(bandit_id integer) RETURNS INTEGER AS $$
+CREATE OR REPLACE FUNCTION what_is_blockid_bandit(bandit integer) RETURNS INTEGER AS $$
 DECLARE
 	RES INTEGER;
 BEGIN
-	SELECT Блок_ЕдиницаТерритории_id INTO RES FROM Проживание WHERE Бандит_id = bandit_id and "времяВыселения" is null ;
+	SELECT Block_AreaUnit_id INTO RES FROM Accommodation WHERE Bandit_id = bandit and checkOutTime is null ;
 	RETURN RES;
 END;
 $$ LANGUAGE plpgsql;
@@ -256,8 +297,8 @@ DECLARE
 	GANG1_ID INTEGER;
 	GANG2_ID INTEGER;
 BEGIN
-	SELECT Банда_id INTO GANG1_ID FROM Блок WHERE ЕдиницаТерритории_id = this_block;
-	SELECT Банда_id INTO GANG2_ID FROM Блок WHERE ЕдиницаТерритории_id = that_block;
+	SELECT Gang_id INTO GANG1_ID FROM Block WHERE AreaUnit_id = this_block;
+	SELECT Gang_id INTO GANG2_ID FROM Block WHERE AreaUnit_id = that_block;
 
 	IF(GANG1_ID = GANG2_ID)
 	THEN
@@ -268,8 +309,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-/*Функция лечения*/
-CREATE OR REPLACE FUNCTION heal_bandit(bandit_id integer) RETURNS BOOLEAN AS $$
+CREATE OR REPLACE FUNCTION heal_bandit(banditid integer) RETURNS BOOLEAN AS $$
 DECLARE 
 	DEL TIME;
 	FAK_NUMB INT;
@@ -278,18 +318,18 @@ DECLARE
 	SEC INT;
 	ROW RECORD;
 BEGIN
-	IF(is_knock_down(bandit_id))
+	IF(is_knock_down(banditid))
 	THEN
-		SELECT безСознания INTO DEL FROM Бандит WHERE id = bandit_id;
+		SELECT isKnockDown INTO DEL FROM Bandit WHERE id = banditid;
 		
 	
-		FOR ROW IN SELECT Предмет.id, Предмет.характеристика FROM Инвентарь 
-						INNER JOIN Предмет ON Инвентарь.Предмет_id = Предмет.id 
-						INNER JOIN ТипПредмета ON Предмет.ТипПредмета_id = ТипПредмета.id 
-						WHERE Инвентарь.Бандит_id = bandit_id 
-						and ТипПредмета.типХарактеристики = 'HEAL'
+		FOR ROW IN SELECT Item.id, Item.characteristic FROM Inventory 
+						INNER JOIN Item ON Inventory.Item_id = Item.id 
+						INNER JOIN ItemType ON Item.ItemType_id = ItemType.id 
+						WHERE Inventory.Bandit_id = banditid 
+						and ItemType.characteristicType = 'HEAL'
 		LOOP
-			FAK_NUMB = ROW.характеристика; 
+			FAK_NUMB = ROW.characteristic; 
 	
 			HOURS := FAK_NUMB/3600;
 			MIN := (FAK_NUMB%3600)/60;
@@ -297,11 +337,11 @@ BEGIN
 			DEL := DEL - make_time(HOURS, MIN, SEC);
 	
 	
-			PERFORM remove_item_from_bandit(ROW.id, bandit_id);
+			PERFORM remove_item_from_bandit(ROW.id, banditid);
 	
 		END LOOP;
 	
-		UPDATE Бандит SET безСознания = DEL WHERE id = bandit_id;
+		UPDATE Bandit SET isKnockDown = DEL WHERE id = banditid;
 		RETURN true;
 	END IF;
 	
@@ -317,11 +357,11 @@ BEGIN
 	FOR ROWP IN SELECT get_block_bandits_id FROM get_block_bandits_id(block_id)
 
 	LOOP
-		FOR ROW IN SELECT Предмет.id FROM Инвентарь 
-						INNER JOIN Предмет ON Инвентарь.Предмет_id = Предмет.id 
-						INNER JOIN ТипПредмета ON Предмет.ТипПредмета_id = ТипПредмета.id 
-						WHERE Инвентарь.Бандит_id = ROWP.get_block_bandits_id 
-						and ТипПредмета.типХарактеристики = 'HEAL'
+		FOR ROW IN SELECT Item.id FROM Inventory 
+						INNER JOIN Item ON Inventory.Item_id = Item.id 
+						INNER JOIN ItemType ON Item.ItemType_id = ItemType.id 
+						WHERE Inventory.Bandit_id = ROWP.get_block_bandits_id 
+						and ItemType.characteristicType = 'HEAL'
 		LOOP
 	
 			PERFORM remove_item_from_bandit(ROW.id, ROWP.get_block_bandits_id);
@@ -331,10 +371,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION remove_item_from_bandit(item_id integer, bandit_id integer) RETURNS void AS $$
+CREATE OR REPLACE FUNCTION remove_item_from_bandit(itemid integer, bandit integer) RETURNS void AS $$
 BEGIN
-	DELETE FROM Инвентарь WHERE Бандит_id = bandit_id AND Предмет_id = item_id;
-	DELETE FROM Предмет WHERE id = item_id;	
+	DELETE FROM Inventory WHERE Bandit_id = bandit AND Item_id = itemid;
+	DELETE FROM Item WHERE id = itemid;	
 END;
 $$ LANGUAGE plpgsql;
 
@@ -346,8 +386,8 @@ DECLARE
 	Y_2 INTEGER;
 	DEC REAL;
 BEGIN
-	SELECT X,Y INTO X_1,Y_1 FROM ЕдиницаТерритории WHERE id= attack_id;
-	SELECT X,Y INTO X_2,Y_2 FROM ЕдиницаТерритории WHERE id= defense_id;
+	SELECT X,Y INTO X_1,Y_1 FROM AreaUnit WHERE id= attack_id;
+	SELECT X,Y INTO X_2,Y_2 FROM AreaUnit WHERE id= defense_id;
 
 	SELECT |/((X_2-X_1)^2 + (Y_2-Y_1)^2) INTO DEC;
 	IF (DEC <= |/(2))
@@ -361,17 +401,26 @@ END;
 $$ LANGUAGE plpgsql;
 
 
+CREATE OR REPLACE FUNCTION get_last_time(worker integer) RETURNS TIMESTAMP AS $$
+DECLARE
+	LAST_TIME TIMESTAMP;
+BEGIN
+	SELECT max(interactionTime) INTO LAST_TIME FROM Work WHERE  Bandit_id = worker;
+	RETURN LAST_TIME;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION work(worker integer,  type_of_product integer, name varchar(45), characteristic integer) RETURNS BOOLEAN AS $$
 DECLARE 
 	RES BOOLEAN;
 	DIFF TIME;
-	LAST_TIME TIME;
+	LAST_TIME TIMESTAMP;
 	ID INTEGER;
 	FLAG BOOLEAN;
 	ID_BLOCK_RESP INTEGER;
 
 BEGIN
-	SELECT max(времяВзаимодействия) INTO LAST_TIME FROM Работа WHERE  Бандит_id = worker;
+	SELECT max(interactionTime) INTO LAST_TIME FROM Work WHERE  Bandit_id = worker;
 	IF (LAST_TIME is null)
 	THEN	
 		FLAG := true;
@@ -387,10 +436,10 @@ BEGIN
 		
 	IF (FLAG and (NOT is_knock_down(worker)))
 	THEN
-		SELECT ЕдиницаТерритории_id INTO ID_BLOCK_RESP FROM Блок WHERE Блок.Банда_id = (SELECT Банда_id FROM Бандит WHERE  Бандит.id = worker) AND респа = true;
-		ID := NEXTVAL('Работа_id_seq');
-		insert into "Работа" values(ID,worker,ID_BLOCK_RESP, now());
-		insert into "Предмет" values (NEXTVAL('Предмет_id_seq'), name, characteristic ,type_of_product, ID);
+		SELECT AreaUnit_id INTO ID_BLOCK_RESP FROM Block WHERE Block.Gang_id = (SELECT Gang_id FROM Bandit WHERE  Bandit.id = worker) AND isRespawn = true;
+		ID := NEXTVAL('Work_id_seq');
+		insert into Work values(ID,worker,ID_BLOCK_RESP, now());
+		insert into Item values (NEXTVAL('Item_id_seq'), name, characteristic ,type_of_product, ID);
 		RETURN true;
 	ELSE
 		RETURN false;

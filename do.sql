@@ -4,29 +4,29 @@ DROP TRIGGER respawn_heal ON Проживание;
 
 DROP TRIGGER create_work_record ON Бандит; 
 
-drop table "Инвентарь" cascade;
+drop table Accommodation cascade;
 
-drop table "Предмет" cascade;
+drop table Item cascade;
 
-drop table "ТипПредмета" cascade;
+drop table ItemType cascade;
 
-drop table "Проживание" cascade;
+drop table Inventory cascade;
 
-drop table "Работа" cascade;
+drop table Work cascade;
 
-drop table "Мастерская" cascade;
+drop table Workshop cascade;
 
-drop table "Попытка" cascade;
+drop table CaptureTry cascade;
 
-drop table "Бандит" cascade;
+drop table Bandit cascade;
 
-drop table "Банда" cascade;
+drop table Gang cascade;
 
-drop table "Блок" cascade;
+drop table Block cascade;
 
-drop table "ЕдиницаТерритории" cascade;
+drop table AreaUnit cascade;
 
-drop table "Захват" cascade;
+drop table Capture cascade;
 
 drop FUNCTION run_over(destination integer, person integer);
 
@@ -68,4 +68,4 @@ drop FUNCTION work(worker integer,  type_of_product integer, name varchar(45), c
 
 drop type color;
 
-drop type "типХарактеристики";
+drop type characteristicType;
